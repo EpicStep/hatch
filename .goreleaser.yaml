@@ -1,0 +1,60 @@
+version: 2
+
+project_name: kubectl-hatch
+
+builds:
+  - id: kubectl-hatch
+    main: ./cmd/kubectl-hatch
+    binary: kubectl-hatch
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: kubectl-hatch
+    builds:
+      - kubectl-hatch
+    name_template: "kubectl-hatch_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+
+release:
+  github:
+    owner: EpicStep
+    name: hatch
+
+krews:
+  - name: hatch
+    ids:
+      - kubectl-hatch
+    repository:
+      owner: EpicStep
+      name: krew-index
+      token: "{{ .Env.KREW_GITHUB_TOKEN }}"
+    homepage: "https://github.com/EpicStep/hatch"
+    short_description: "Dev SSH into K8s pods via image swap"
+    description: |
+      Hatch patches a DaemonSet, Deployment, or StatefulSet to swap the
+      production image with an SSH-enabled dev container, sets up
+      port-forwarding, and provides a ready-to-use SSH connection.
+    skip_upload: auto
