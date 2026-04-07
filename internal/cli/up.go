@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -19,16 +18,18 @@ import (
 )
 
 type upOptions struct {
-	*hatchOptions
+	*generalOptions
 
-	Node      string
-	Pod       string
-	SSHKey    string
-	LocalPort int
+	node      string
+	pod       string
+	sshKey    string
+	localPort int
 }
 
-func newUpCmd(ho *hatchOptions) *cobra.Command {
-	o := &upOptions{hatchOptions: ho}
+func newUpCmd(generalOptions *generalOptions) *cobra.Command {
+	opts := &upOptions{
+		generalOptions: generalOptions,
+	}
 
 	home, _ := os.UserHomeDir()
 	defaultKey := filepath.Join(home, ".ssh", "id_ed25519.pub")
@@ -38,67 +39,63 @@ func newUpCmd(ho *hatchOptions) *cobra.Command {
 		Short: "Swap workload image with dev container and start port-forwarding",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return o.Run(cmd.Context())
+			return runUp(cmd, opts)
 		},
 	}
 
-	cmd.Flags().StringVar(&o.Node, "node", "", "select pod on a specific node (useful for DaemonSets)")
-	cmd.Flags().StringVar(&o.Pod, "pod", "", "select a specific pod by name")
-	cmd.Flags().StringVar(&o.SSHKey, "ssh-key", defaultKey, "path to SSH public key")
-	cmd.Flags().IntVar(&o.LocalPort, "local-port", 2222, "local port for SSH forwarding")
+	cmd.Flags().StringVar(&opts.node, "node", "", "select pod on a specific node (useful for DaemonSets)")
+	cmd.Flags().StringVar(&opts.pod, "pod", "", "select a specific pod by name")
+	cmd.Flags().StringVar(&opts.sshKey, "ssh-key", defaultKey, "path to SSH public key")
+	cmd.Flags().IntVar(&opts.localPort, "local-port", 2222, "local port for SSH forwarding")
 
 	return cmd
 }
 
-func (o *upOptions) Run(ctx context.Context) error {
-	cfg := o.config
+func runUp(cmd *cobra.Command, opts *upOptions) error {
+	ctx := cmd.Context()
 
-	if err := o.validate(); err != nil {
-		return err
-	}
-
-	if o.Node != "" && o.Pod != "" {
+	if opts.node != "" && opts.pod != "" {
 		return errors.New("--node and --pod are mutually exclusive")
 	}
 
-	if strings.ToLower(cfg.Kind) == "daemonset" && o.Node == "" && o.Pod == "" {
-		fmt.Fprintln(o.streams.ErrOut, "Warning: no --node specified for DaemonSet; will pick a pod from any node")
+	if strings.ToLower(opts.kind) == "daemonset" && opts.node == "" && opts.pod == "" {
+		fmt.Println("Warning: no --node specified for DaemonSet; will pick a pod from any node")
 	}
 
-	sshPubKeyBytes, err := os.ReadFile(o.SSHKey)
+	sshPubKeyBytes, err := os.ReadFile(opts.sshKey)
 	if err != nil {
-		return fmt.Errorf("reading SSH key %s: %w", o.SSHKey, err)
+		return fmt.Errorf("reading SSH key '%s': %w", opts.sshKey, err)
 	}
 
 	sshPubKey := strings.TrimSpace(string(sshPubKeyBytes))
 
-	clientset, err := o.kubeClient()
+	client, err := opts.kubeClient()
 	if err != nil {
 		return err
 	}
 
-	namespace := cfg.Namespace
-
-	w, err := workload.New(ctx, clientset, namespace, cfg.Kind, cfg.Workload)
+	w, err := workload.New(ctx, client, opts.namespace, opts.kind, opts.workload)
 	if err != nil {
 		return err
 	}
 
-	container, _, err := workload.FindContainer(w, cfg.Container)
+	container, err := workload.FindContainer(w, opts.container)
 	if err != nil {
-		return fmt.Errorf("in %s/%s: %w", cfg.Kind, cfg.Workload, err)
+		return fmt.Errorf("in %s/%s: %w", opts.kind, opts.workload, err)
 	}
 
 	var storedNode, storedPod string
 	reconnect := false
 	if w.Annotations()[annotationActive] == "true" {
 		activeUser := w.Annotations()[annotationUser]
-		if activeUser != o.user {
+		if activeUser != opts.user {
 			return fmt.Errorf("dev mode already active (by %s), use 'hatch down' first or --user to match", activeUser)
 		}
-		fmt.Fprintln(o.streams.Out, "Dev mode already active, reconnecting...")
+
+		fmt.Println("Dev mode already active, reconnecting...")
 		storedNode = w.Annotations()[annotationNode]
 		storedPod = w.Annotations()[annotationPod]
+
 		reconnect = true
 	}
 
@@ -114,9 +111,9 @@ func (o *upOptions) Run(ctx context.Context) error {
 		}
 		ann[annotationActive] = "true"
 		ann[annotationOriginalImage] = originalImage
-		ann[annotationUser] = o.user
+		ann[annotationUser] = opts.user
 
-		container.Image = cfg.Image
+		container.Image = opts.image
 		container.Env = append(container.Env, corev1.EnvVar{
 			Name:  "AUTHORIZED_KEYS",
 			Value: sshPubKey,
@@ -127,27 +124,26 @@ func (o *upOptions) Run(ctx context.Context) error {
 			return fmt.Errorf("building patch: %w", err)
 		}
 
-		fmt.Fprintf(o.streams.Out, "Patching %s/%s: image=%s\n", cfg.Kind, cfg.Workload, cfg.Image)
+		fmt.Printf("Patching %s/%s: image=%s\n", opts.kind, opts.workload, opts.image)
 
-		if err := w.Patch(ctx, patchBytes, types.StrategicMergePatchType); err != nil {
+		if err = w.Patch(ctx, patchBytes, types.StrategicMergePatchType); err != nil {
 			return fmt.Errorf("patching workload: %w", err)
 		}
 
-		fmt.Fprintln(o.streams.Out, "Waiting for rollout...")
+		fmt.Println("Waiting for rollout...")
 
-		if err := kubectlRolloutStatus(ctx, o.configFlags, namespace, cfg.Kind, cfg.Workload); err != nil {
+		if err = kubectlRolloutStatus(ctx, opts.k8sConfig, opts.namespace, opts.kind, opts.workload); err != nil {
 			return fmt.Errorf("waiting for rollout: %w", err)
 		}
 	}
 
-	pod, err := selectPod(ctx, clientset, namespace, w.Selector(), o.Node, o.Pod, storedNode, storedPod)
+	pod, err := selectPod(ctx, client, opts.namespace, w.Selector(), opts.node, opts.pod, storedNode, storedPod)
 	if err != nil {
 		return fmt.Errorf("selecting pod: %w", err)
 	}
 
-	fmt.Fprintf(o.streams.Out, "Waiting for pod %s...\n", pod.Name)
-
-	if err := waitForPodReady(ctx, clientset, namespace, pod.Name); err != nil {
+	fmt.Printf("Waiting for pod %s...\n", pod.Name)
+	if err = waitForPodReady(ctx, client, opts.namespace, pod.Name); err != nil {
 		return fmt.Errorf("waiting for pod ready: %w", err)
 	}
 
@@ -158,6 +154,7 @@ func (o *upOptions) Run(ctx context.Context) error {
 		ann = make(map[string]string)
 		w.SetAnnotations(ann)
 	}
+
 	ann[annotationPod] = pod.Name
 	ann[annotationNode] = pod.Spec.NodeName
 
@@ -167,33 +164,37 @@ func (o *upOptions) Run(ctx context.Context) error {
 	}
 
 	// Remove stale host key to avoid MITM warning after container restart.
-	home, _ := os.UserHomeDir()
-	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("getting home dir: %w", err)
+	}
 
-	if err := knownhosts.RemoveEntry(knownHostsPath, "localhost", o.LocalPort); err != nil {
-		fmt.Fprintf(o.streams.ErrOut, "Warning: could not clean known_hosts: %v\n", err)
+	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
+	if err = knownhosts.RemoveEntry(knownHostsPath, "localhost", opts.localPort); err != nil {
+		fmt.Printf("Warning: could not clean known_hosts: %v\n", err)
 	}
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	pfCmd := kubectlPortForward(ctx, o.configFlags, namespace, pod.Name, o.LocalPort, 2222)
-	pfCmd.Stdout = o.streams.Out
-	pfCmd.Stderr = o.streams.ErrOut
+	pfCmd := kubectlPortForward(ctx, opts.k8sConfig, opts.namespace, pod.Name, opts.localPort, 2222)
+	pfCmd.Stdout = cmd.OutOrStdout()
+	pfCmd.Stderr = cmd.OutOrStderr()
 
-	if err := pfCmd.Start(); err != nil {
+	if err = pfCmd.Start(); err != nil {
 		return fmt.Errorf("starting port-forward: %w", err)
 	}
 
-	fmt.Fprint(o.streams.Out, "\n=== Dev environment ready ===\n")
-	fmt.Fprintf(o.streams.Out, "SSH:   ssh -p %d nonroot@localhost\n", o.LocalPort)
-	fmt.Fprint(o.streams.Out, "Stop:  Ctrl+C\n\n")
+	fmt.Println("\n=== Dev environment ready ===")
+	fmt.Printf("SSH:   ssh -p %d nonroot@localhost\n", opts.localPort)
+	fmt.Print("Stop:  Ctrl+C\n\n")
 
-	if err := pfCmd.Wait(); err != nil {
+	if err = pfCmd.Wait(); err != nil {
 		if ctx.Err() != nil {
-			fmt.Fprintln(o.streams.ErrOut, "\nStopping port-forward...")
+			fmt.Println("\nStopping port-forward...")
 			return nil
 		}
+
 		return fmt.Errorf("port-forward: %w", err)
 	}
 

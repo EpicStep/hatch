@@ -58,14 +58,17 @@ func New(ctx context.Context, client kubernetes.Interface, namespace, kind, name
 	}
 }
 
-// FindContainer returns a pointer to the named container in the pod spec and its index.
-func FindContainer(w Workload, name string) (*corev1.Container, int, error) {
-	for i := range w.PodSpec().Containers {
-		if w.PodSpec().Containers[i].Name == name {
-			return &w.PodSpec().Containers[i], i, nil
+// FindContainer returns a pointer to the named container in the pod spec.
+func FindContainer(w Workload, name string) (corev1.Container, error) {
+	for _, container := range w.PodSpec().Containers {
+		if container.Name != name {
+			continue
 		}
+
+		return container, nil
 	}
-	return nil, -1, fmt.Errorf("container %q not found", name)
+
+	return corev1.Container{}, fmt.Errorf("container '%s' not found", name)
 }
 
 type daemonSetWorkload struct {

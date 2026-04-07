@@ -1,20 +1,22 @@
 package cli
 
 import (
+	"errors"
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/EpicStep/hatch/internal/config"
 )
 
-type hatchOptions struct {
-	configFlags *genericclioptions.ConfigFlags
-	config      *config.Config
-	streams     genericclioptions.IOStreams
+type generalOptions struct {
+	k8sConfig *genericclioptions.ConfigFlags
 
 	configPath string
+	namespace  string
 	kind       string
 	workload   string
 	container  string
@@ -22,11 +24,31 @@ type hatchOptions struct {
 	user       string
 }
 
+func (opts *generalOptions) validate() error {
+	if opts.workload == "" {
+		return errors.New("workload name is required (set in .hatch.yaml or use --workload)")
+	}
+
+	if opts.workload == "" {
+		return errors.New("container name is required (set in .hatch.yaml or use --container)")
+	}
+
+	return nil
+}
+
+func (opts *generalOptions) kubeClient() (kubernetes.Interface, error) {
+	restConfig, err := opts.k8sConfig.ToRESTConfig()
+	if err != nil {
+		return nil, fmt.Errorf("opts.k8sConfig.ToRESTConfig: %w", err)
+	}
+
+	return kubernetes.NewForConfig(restConfig)
+}
+
 // NewRootCmd creates the top-level hatch cobra command.
-func NewRootCmd(version string, streams genericclioptions.IOStreams) *cobra.Command {
-	o := &hatchOptions{
-		configFlags: genericclioptions.NewConfigFlags(true),
-		streams:     streams,
+func NewRootCmd(version string) *cobra.Command {
+	opts := &generalOptions{
+		k8sConfig: genericclioptions.NewConfigFlags(true),
 	}
 
 	cmd := &cobra.Command{
@@ -35,59 +57,56 @@ func NewRootCmd(version string, streams genericclioptions.IOStreams) *cobra.Comm
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load(o.configPath)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			configFromFile, err := config.Load(opts.configPath)
 			if err != nil {
-				return err
+				return fmt.Errorf("config.Load: %w", err)
 			}
 
-			if cmd.Flags().Changed("kind") {
-				cfg.Kind = o.kind
-			}
-			if cmd.Flags().Changed("workload") {
-				cfg.Workload = o.workload
-			}
-			if cmd.Flags().Changed("container") {
-				cfg.Container = o.container
-			}
-			if cmd.Flags().Changed("image") {
-				cfg.Image = o.image
-			}
-			if cmd.Flags().Changed("namespace") {
-				cfg.Namespace = *o.configFlags.Namespace
+			if !cmd.Flags().Changed("namespace") {
+				opts.namespace = configFromFile.Namespace
 			}
 
-			cfg.ApplyDefaults()
-
-			if o.user == "" {
-				o.user = os.Getenv("USER")
+			if !cmd.Flags().Changed("kind") {
+				opts.kind = configFromFile.Kind
 			}
 
-			// Resolve namespace from kubeconfig context if still at default.
-			if !cmd.Flags().Changed("namespace") && cfg.Namespace == "default" {
-				if ns, _, err := o.configFlags.ToRawKubeConfigLoader().Namespace(); err == nil && ns != "" {
-					cfg.Namespace = ns
-				}
+			if !cmd.Flags().Changed("workload") {
+				opts.workload = configFromFile.Workload
 			}
 
-			o.config = cfg
+			if !cmd.Flags().Changed("container") {
+				opts.container = configFromFile.Container
+			}
+
+			if !cmd.Flags().Changed("image") {
+				opts.image = configFromFile.Image
+			}
+
+			if opts.user == "" {
+				opts.user = os.Getenv("USER")
+			}
+
+			if err = opts.validate(); err != nil {
+				return fmt.Errorf("validate: %w", err)
+			}
 
 			return nil
 		},
 	}
 
-	cmd.PersistentFlags().StringVar(&o.configPath, "config", "", "path to .hatch.yaml")
-	cmd.PersistentFlags().StringVar(&o.kind, "kind", "", "workload kind: daemonset, deployment, statefulset")
-	cmd.PersistentFlags().StringVar(&o.workload, "workload", "", "workload name")
-	cmd.PersistentFlags().StringVar(&o.container, "container", "", "container name in the pod spec")
-	cmd.PersistentFlags().StringVar(&o.image, "image", "", "dev image reference")
-	o.configFlags.AddFlags(cmd.PersistentFlags())
+	cmd.PersistentFlags().StringVar(&opts.configPath, "config", "", "path to .hatch.yaml")
+	cmd.PersistentFlags().StringVar(&opts.kind, "kind", "", "workload kind: daemonset, deployment, statefulset")
+	cmd.PersistentFlags().StringVar(&opts.workload, "workload", "", "workload name")
+	cmd.PersistentFlags().StringVar(&opts.container, "container", "", "container name in the pod spec")
+	cmd.PersistentFlags().StringVar(&opts.image, "image", "", "dev image reference")
+	opts.k8sConfig.AddFlags(cmd.PersistentFlags())
 
-	cmd.PersistentFlags().StringVar(&o.user, "dev-user", "", "user identifier for multi-user environments (default: $USER)")
+	cmd.PersistentFlags().StringVar(&opts.user, "dev-user", "", "user identifier for multi-user environments (default: $USER)")
 
-	cmd.AddCommand(newUpCmd(o))
-	cmd.AddCommand(newDownCmd(o))
-	cmd.AddCommand(newStatusCmd(o))
+	cmd.AddCommand(newUpCmd(opts))
+	cmd.AddCommand(newDownCmd(opts))
+	cmd.AddCommand(newStatusCmd(opts))
 
 	return cmd
 }

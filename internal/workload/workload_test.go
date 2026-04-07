@@ -152,14 +152,12 @@ func TestFindContainer(t *testing.T) {
 	w, err := New(context.Background(), client, "default", "deployment", "web")
 	require.NoError(t, err)
 
-	c, idx, err := FindContainer(w, "app")
+	c, err := FindContainer(w, "app")
 	require.NoError(t, err)
-	assert.Equal(t, 0, idx)
 	assert.Equal(t, "nginx:1.25", c.Image)
 
-	c, idx, err = FindContainer(w, "sidecar")
+	c, err = FindContainer(w, "sidecar")
 	require.NoError(t, err)
-	assert.Equal(t, 1, idx)
 	assert.Equal(t, "envoy:latest", c.Image)
 }
 
@@ -170,7 +168,7 @@ func TestFindContainer_NotFound(t *testing.T) {
 	w, err := New(context.Background(), client, "default", "deployment", "web")
 	require.NoError(t, err)
 
-	_, _, err = FindContainer(w, "missing")
+	_, err = FindContainer(w, "missing")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "container \"missing\" not found")
 }

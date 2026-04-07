@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os/exec"
 	"slices"
@@ -25,36 +24,6 @@ const (
 	annotationPod           = "hatch.dev/pod"
 )
 
-func (o *hatchOptions) validate() error {
-	if o.config.Workload == "" {
-		return errors.New("workload name is required (set in .hatch.yaml or use --workload)")
-	}
-	if o.config.Container == "" {
-		return errors.New("container name is required (set in .hatch.yaml or use --container)")
-	}
-	return nil
-}
-
-func (o *hatchOptions) kubeClient() (kubernetes.Interface, error) {
-	restConfig, err := o.configFlags.ToRESTConfig()
-	if err != nil {
-		return nil, fmt.Errorf("building kubeconfig: %w", err)
-	}
-
-	return kubernetes.NewForConfig(restConfig)
-}
-
-func kubectlGlobalArgs(f *genericclioptions.ConfigFlags) []string {
-	var args []string
-	if f.KubeConfig != nil && *f.KubeConfig != "" {
-		args = append(args, "--kubeconfig", *f.KubeConfig)
-	}
-	if f.Context != nil && *f.Context != "" {
-		args = append(args, "--context", *f.Context)
-	}
-	return args
-}
-
 func kubectlRolloutStatus(ctx context.Context, flags *genericclioptions.ConfigFlags, namespace, kind, name string) error {
 	args := append(kubectlGlobalArgs(flags), "rollout", "status", kind+"/"+name, "-n", namespace, "--timeout=120s")
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
@@ -72,6 +41,7 @@ func waitForPodReady(ctx context.Context, clientset kubernetes.Interface, namesp
 		if err != nil {
 			return false, nil
 		}
+
 		return isPodReady(pod), nil
 	})
 }
@@ -140,19 +110,41 @@ func findPodOnNode(ctx context.Context, clientset kubernetes.Interface, namespac
 		return nil, fmt.Errorf("no pod found on node %s", node)
 	}
 
-	for i := range list.Items {
-		if isPodReady(&list.Items[i]) {
-			return &list.Items[i], nil
+	for _, pod := range list.Items {
+		if !isPodReady(&pod) {
+			continue
 		}
+
+		return &pod, nil
 	}
+
 	return &list.Items[0], nil
 }
 
 func isPodReady(pod *corev1.Pod) bool {
+	if pod.Status.ObservedGeneration != pod.Generation {
+		return false
+	}
+
 	for _, cond := range pod.Status.Conditions {
-		if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
-			return true
+		if cond.Type != corev1.PodReady {
+			continue
 		}
+
+		return cond.Status == corev1.ConditionTrue
 	}
 	return false
+}
+
+func kubectlGlobalArgs(f *genericclioptions.ConfigFlags) []string {
+	var args []string
+	if f.KubeConfig != nil && *f.KubeConfig != "" {
+		args = append(args, "--kubeconfig", *f.KubeConfig)
+	}
+
+	if f.Context != nil && *f.Context != "" {
+		args = append(args, "--context", *f.Context)
+	}
+
+	return args
 }

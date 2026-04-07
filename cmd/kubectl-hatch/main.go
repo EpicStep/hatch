@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"k8s.io/cli-runtime/pkg/genericiooptions"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"github.com/EpicStep/hatch/internal/cli"
@@ -16,10 +15,9 @@ var (
 )
 
 func main() {
-	streams := genericiooptions.IOStreams{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr}
-	root := cli.NewRootCmd(version+" ("+commit+")", streams)
+	root := cli.NewRootCmd(version + " (" + commit + ")")
 	if err := root.Execute(); err != nil {
-		fmt.Fprintln(streams.ErrOut, err)
+		fmt.Println(err)
 		os.Exit(1)
 	}
 }
