@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -162,9 +163,29 @@ func activateDevMode(ctx context.Context, opts *upOptions, w workload.Workload, 
 	ann[annotationOriginalImage] = container.Image
 	ann[annotationUser] = opts.user
 
+	if len(container.Command) > 0 {
+		commandJSON, err := json.Marshal(container.Command)
+		if err != nil {
+			return fmt.Errorf("marshaling original command: %w", err)
+		}
+
+		ann[annotationOriginalCommand] = string(commandJSON)
+	}
+
+	if len(container.Args) > 0 {
+		argsJSON, err := json.Marshal(container.Args)
+		if err != nil {
+			return fmt.Errorf("marshaling original args: %w", err)
+		}
+
+		ann[annotationOriginalArgs] = string(argsJSON)
+	}
+
 	w.SetAnnotations(ann)
 
 	container.Image = opts.image
+	container.Command = []string{"/home/nonroot/entrypoint-dev.sh"}
+	container.Args = nil
 	container.Env = append(container.Env, corev1.EnvVar{
 		Name:  "AUTHORIZED_KEYS",
 		Value: sshPubKey,

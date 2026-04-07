@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -54,6 +55,21 @@ func newDownCmd(opts *generalOptions) *cobra.Command {
 			before := w.DeepCopy()
 
 			container.Image = originalImage
+			container.Command = nil
+			container.Args = nil
+
+			if raw := w.Annotations()[annotationOriginalCommand]; raw != "" {
+				if err = json.Unmarshal([]byte(raw), &container.Command); err != nil {
+					return fmt.Errorf("restoring original command: %w", err)
+				}
+			}
+
+			if raw := w.Annotations()[annotationOriginalArgs]; raw != "" {
+				if err = json.Unmarshal([]byte(raw), &container.Args); err != nil {
+					return fmt.Errorf("restoring original args: %w", err)
+				}
+			}
+
 			container.Env = slices.DeleteFunc(container.Env, func(e corev1.EnvVar) bool {
 				return e.Name == "AUTHORIZED_KEYS"
 			})
@@ -61,6 +77,8 @@ func newDownCmd(opts *generalOptions) *cobra.Command {
 			ann := w.Annotations()
 			delete(ann, annotationActive)
 			delete(ann, annotationOriginalImage)
+			delete(ann, annotationOriginalCommand)
+			delete(ann, annotationOriginalArgs)
 			delete(ann, annotationUser)
 			delete(ann, annotationNode)
 			delete(ann, annotationPod)

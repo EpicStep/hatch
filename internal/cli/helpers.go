@@ -17,11 +17,13 @@ import (
 )
 
 const (
-	annotationActive        = "hatch.dev/active"
-	annotationOriginalImage = "hatch.dev/original-image"
-	annotationUser          = "hatch.dev/user"
-	annotationNode          = "hatch.dev/node"
-	annotationPod           = "hatch.dev/pod"
+	annotationActive          = "hatch.dev/active"
+	annotationOriginalImage   = "hatch.dev/original-image"
+	annotationOriginalCommand = "hatch.dev/original-command"
+	annotationOriginalArgs    = "hatch.dev/original-args"
+	annotationUser            = "hatch.dev/user"
+	annotationNode            = "hatch.dev/node"
+	annotationPod             = "hatch.dev/pod"
 )
 
 func kubectlRolloutStatus(ctx context.Context, flags *genericclioptions.ConfigFlags, namespace, kind, name string) error {
