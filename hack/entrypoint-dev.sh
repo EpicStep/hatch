@@ -15,7 +15,7 @@ env | grep -Ev '^(HOME|HOSTNAME|PATH|TERM|SHLVL|PWD|SHELL|USER|LOGNAME|AUTHORIZE
 # Setup authorized_keys from env var (injected by dev-up.sh via K8s patch)
 if [ -n "${AUTHORIZED_KEYS}" ]; then
     echo "${AUTHORIZED_KEYS}" > /home/nonroot/.ssh/authorized_keys
-    chmod 600 /home/nonroot/.ssh/authorized_keys
+    chmod 644 /home/nonroot/.ssh/authorized_keys
 fi
 
 exec /usr/sbin/sshd -D -e -f /home/nonroot/sshd_config

@@ -18,7 +18,7 @@ RUN groupadd -g 65532 nonroot \
     && usermod -p '*' nonroot \
     && mkdir -p /home/nonroot/.ssh \
     && chown -R nonroot:nonroot /home/nonroot \
-    && chmod 700 /home/nonroot/.ssh
+    && chmod 755 /home/nonroot/.ssh
 
 # sshd config: runs as nonroot on port 2222, no PAM, no privsep
 COPY <<EOF /home/nonroot/sshd_config
