@@ -10,7 +10,7 @@ fi
 # SSH sessions (and any process started through them) inherit these vars.
 # This is how K8s secrets become visible to remotely launched processes.
 env | grep -Ev '^(HOME|HOSTNAME|PATH|TERM|SHLVL|PWD|SHELL|USER|LOGNAME|AUTHORIZED_KEYS|_)=' \
-    > /home/nonroot/.ssh/environment
+    > /home/nonroot/.ssh/environment || true
 
 # Setup authorized_keys from env var (injected by dev-up.sh via K8s patch)
 if [ -n "${AUTHORIZED_KEYS}" ]; then

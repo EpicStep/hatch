@@ -15,30 +15,33 @@ RUN apt-get update \
 # nonroot user (uid 65532) — matches distroless nonroot for prod consistency
 RUN groupadd -g 65532 nonroot \
     && useradd -u 65532 -g nonroot -m -d /home/nonroot -s /bin/bash nonroot \
+    && usermod -p '*' nonroot \
     && mkdir -p /home/nonroot/.ssh \
     && chown -R nonroot:nonroot /home/nonroot \
     && chmod 700 /home/nonroot/.ssh
 
 # sshd config: runs as nonroot on port 2222, no PAM, no privsep
-RUN cat > /home/nonroot/sshd_config << 'EOF'
+COPY <<EOF /home/nonroot/sshd_config
 Port 2222
 HostKey /home/nonroot/.ssh/ssh_host_ed25519_key
 AuthorizedKeysFile /home/nonroot/.ssh/authorized_keys
+AuthenticationMethods publickey
 PasswordAuthentication no
+KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 PermitUserEnvironment yes
 StrictModes no
 UsePAM no
 PidFile /home/nonroot/sshd.pid
 EOF
-RUN chown nonroot:nonroot /home/nonroot/sshd_config
 
-COPY hack/entrypoint-dev.sh /home/nonroot/entrypoint-dev.sh
-RUN chmod +x /home/nonroot/entrypoint-dev.sh
+COPY --chmod=755 hack/entrypoint-dev.sh /home/nonroot/entrypoint-dev.sh
+
+RUN chown -R nonroot:nonroot /home/nonroot/sshd_config /home/nonroot/entrypoint-dev.sh
 
 EXPOSE 2222
 
-USER nonroot
+USER 65532
 WORKDIR /home/nonroot
 
 ENTRYPOINT ["/home/nonroot/entrypoint-dev.sh"]
