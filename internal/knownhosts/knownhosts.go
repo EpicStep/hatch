@@ -22,6 +22,7 @@ func RemoveEntry(path string, host string, port int) error {
 		if os.IsNotExist(err) {
 			return nil
 		}
+
 		return err
 	}
 

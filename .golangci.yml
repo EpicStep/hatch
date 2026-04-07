@@ -41,7 +41,7 @@ linters:
         - name: package-comments
           disabled: true
         - name: unhandled-error
-          arguments: ["fmt.Fprint", "fmt.Println", "fmt.Fprintln", "fmt.Fprintf"]
+          arguments: ["fmt.Fprint", "fmt.Print", "fmt.Printf", "fmt.Println", "fmt.Fprintln", "fmt.Fprintf"]
 
 formatters:
   enable:

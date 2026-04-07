@@ -19,12 +19,12 @@ func newStatusCmd(opts *generalOptions) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 
-			clientset, err := opts.kubeClient()
+			client, err := opts.kubeClient()
 			if err != nil {
 				return err
 			}
 
-			w, err := workload.New(ctx, clientset, opts.namespace, opts.kind, opts.workload)
+			w, err := workload.New(ctx, client, opts.namespace, opts.kind, opts.workload)
 			if err != nil {
 				return err
 			}
@@ -62,12 +62,12 @@ func newStatusCmd(opts *generalOptions) *cobra.Command {
 				fmt.Printf("Dev Mode:   %s\n", devInfo)
 				fmt.Printf("Original:   %s\n", ann[annotationOriginalImage])
 			} else {
-				fmt.Printf("Dev Mode:   INACTIVE")
+				fmt.Print("Dev Mode:   INACTIVE")
 			}
 
 			fmt.Println()
 
-			pods, err := clientset.CoreV1().Pods(opts.namespace).List(ctx, metav1.ListOptions{
+			pods, err := client.CoreV1().Pods(opts.namespace).List(ctx, metav1.ListOptions{
 				LabelSelector: labels.Set(w.Selector()).String(),
 			})
 			if err != nil {

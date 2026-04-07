@@ -3,6 +3,7 @@ package workload
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -59,16 +60,18 @@ func New(ctx context.Context, client kubernetes.Interface, namespace, kind, name
 }
 
 // FindContainer returns a pointer to the named container in the pod spec.
-func FindContainer(w Workload, name string) (corev1.Container, error) {
-	for _, container := range w.PodSpec().Containers {
-		if container.Name != name {
-			continue
-		}
+func FindContainer(w Workload, name string) (*corev1.Container, error) {
+	containers := w.PodSpec().Containers
 
-		return container, nil
+	idx := slices.IndexFunc(containers, func(c corev1.Container) bool {
+		return c.Name == name
+	})
+
+	if idx < 0 {
+		return nil, fmt.Errorf("container '%s' not found", name)
 	}
 
-	return corev1.Container{}, fmt.Errorf("container '%s' not found", name)
+	return &containers[idx], nil
 }
 
 type daemonSetWorkload struct {

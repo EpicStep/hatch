@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -24,6 +25,12 @@ type upOptions struct {
 	pod       string
 	sshKey    string
 	localPort int
+}
+
+type reconnectHints struct {
+	active bool
+	node   string
+	pod    string
 }
 
 func newUpCmd(generalOptions *generalOptions) *cobra.Command {
@@ -62,12 +69,10 @@ func runUp(cmd *cobra.Command, opts *upOptions) error {
 		fmt.Println("Warning: no --node specified for DaemonSet; will pick a pod from any node")
 	}
 
-	sshPubKeyBytes, err := os.ReadFile(opts.sshKey)
+	sshPubKey, err := readSSHPublicKey(opts.sshKey)
 	if err != nil {
-		return fmt.Errorf("reading SSH key '%s': %w", opts.sshKey, err)
+		return err
 	}
-
-	sshPubKey := strings.TrimSpace(string(sshPubKeyBytes))
 
 	client, err := opts.kubeClient()
 	if err != nil {
@@ -84,104 +89,147 @@ func runUp(cmd *cobra.Command, opts *upOptions) error {
 		return fmt.Errorf("in %s/%s: %w", opts.kind, opts.workload, err)
 	}
 
-	var storedNode, storedPod string
-	reconnect := false
-	if w.Annotations()[annotationActive] == "true" {
-		activeUser := w.Annotations()[annotationUser]
-		if activeUser != opts.user {
-			return fmt.Errorf("dev mode already active (by %s), use 'hatch down' first or --user to match", activeUser)
-		}
-
-		fmt.Println("Dev mode already active, reconnecting...")
-		storedNode = w.Annotations()[annotationNode]
-		storedPod = w.Annotations()[annotationPod]
-
-		reconnect = true
+	hints, err := checkReconnect(w, opts.user)
+	if err != nil {
+		return err
 	}
 
-	if !reconnect {
-		originalImage := container.Image
-		before := w.DeepCopy()
-
-		// Typed mutations: set annotations, swap image, inject SSH key.
-		ann := w.Annotations()
-		if ann == nil {
-			ann = make(map[string]string)
-			w.SetAnnotations(ann)
-		}
-		ann[annotationActive] = "true"
-		ann[annotationOriginalImage] = originalImage
-		ann[annotationUser] = opts.user
-
-		container.Image = opts.image
-		container.Env = append(container.Env, corev1.EnvVar{
-			Name:  "AUTHORIZED_KEYS",
-			Value: sshPubKey,
-		})
-
-		patchBytes, err := workload.MergeFrom(before, w.Object())
-		if err != nil {
-			return fmt.Errorf("building patch: %w", err)
-		}
-
-		fmt.Printf("Patching %s/%s: image=%s\n", opts.kind, opts.workload, opts.image)
-
-		if err = w.Patch(ctx, patchBytes, types.StrategicMergePatchType); err != nil {
-			return fmt.Errorf("patching workload: %w", err)
-		}
-
-		fmt.Println("Waiting for rollout...")
-
-		if err = kubectlRolloutStatus(ctx, opts.k8sConfig, opts.namespace, opts.kind, opts.workload); err != nil {
-			return fmt.Errorf("waiting for rollout: %w", err)
+	if !hints.active {
+		if err = activateDevMode(ctx, opts, w, container, sshPubKey); err != nil {
+			return err
 		}
 	}
 
-	pod, err := selectPod(ctx, client, opts.namespace, w.Selector(), opts.node, opts.pod, storedNode, storedPod)
+	pod, err := selectPod(ctx, client, opts.namespace, w.Selector(), opts.node, opts.pod, hints)
 	if err != nil {
 		return fmt.Errorf("selecting pod: %w", err)
 	}
 
 	fmt.Printf("Waiting for pod %s...\n", pod.Name)
+
 	if err = waitForPodReady(ctx, client, opts.namespace, pod.Name); err != nil {
 		return fmt.Errorf("waiting for pod ready: %w", err)
 	}
 
-	// Record which pod we connected to for future reconnects.
-	trackBefore := w.DeepCopy()
+	if err = trackReconnectInfo(ctx, w, pod); err != nil {
+		return err
+	}
+
+	cleanKnownHosts(opts.localPort)
+
+	return startPortForward(cmd, opts, pod.Name)
+}
+
+func readSSHPublicKey(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading SSH key '%s': %w", path, err)
+	}
+
+	return strings.TrimSpace(string(data)), nil
+}
+
+func checkReconnect(w workload.Workload, user string) (reconnectHints, error) {
+	ann := w.Annotations()
+
+	if ann[annotationActive] != "true" {
+		return reconnectHints{}, nil
+	}
+
+	activeUser := ann[annotationUser]
+	if activeUser != user {
+		return reconnectHints{}, fmt.Errorf("dev mode already active (by %s), use 'hatch down' first or --user to match", activeUser)
+	}
+
+	fmt.Println("Dev mode already active, reconnecting...")
+
+	return reconnectHints{
+		active: true,
+		node:   ann[annotationNode],
+		pod:    ann[annotationPod],
+	}, nil
+}
+
+func activateDevMode(ctx context.Context, opts *upOptions, w workload.Workload, container *corev1.Container, sshPubKey string) error {
+	before := w.DeepCopy()
+
 	ann := w.Annotations()
 	if ann == nil {
 		ann = make(map[string]string)
-		w.SetAnnotations(ann)
+	}
+
+	ann[annotationActive] = "true"
+	ann[annotationOriginalImage] = container.Image
+	ann[annotationUser] = opts.user
+
+	w.SetAnnotations(ann)
+
+	container.Image = opts.image
+	container.Env = append(container.Env, corev1.EnvVar{
+		Name:  "AUTHORIZED_KEYS",
+		Value: sshPubKey,
+	})
+
+	patchBytes, err := workload.MergeFrom(before, w.Object())
+	if err != nil {
+		return fmt.Errorf("building patch: %w", err)
+	}
+
+	fmt.Printf("Patching %s/%s: image=%s\n", opts.kind, opts.workload, opts.image)
+
+	if err = w.Patch(ctx, patchBytes, types.StrategicMergePatchType); err != nil {
+		return fmt.Errorf("patching workload: %w", err)
+	}
+
+	fmt.Println("Waiting for rollout...")
+
+	return kubectlRolloutStatus(ctx, opts.k8sConfig, opts.namespace, opts.kind, opts.workload)
+}
+
+func trackReconnectInfo(ctx context.Context, w workload.Workload, pod *corev1.Pod) error {
+	before := w.DeepCopy()
+
+	ann := w.Annotations()
+	if ann == nil {
+		ann = make(map[string]string)
 	}
 
 	ann[annotationPod] = pod.Name
 	ann[annotationNode] = pod.Spec.NodeName
 
-	trackPatch, err := workload.MergeFrom(trackBefore, w.Object())
-	if err == nil {
-		_ = w.Patch(ctx, trackPatch, types.MergePatchType)
+	w.SetAnnotations(ann)
+
+	patchBytes, err := workload.MergeFrom(before, w.Object())
+	if err != nil {
+		return err
 	}
 
-	// Remove stale host key to avoid MITM warning after container restart.
+	return w.Patch(ctx, patchBytes, types.MergePatchType)
+}
+
+func cleanKnownHosts(localPort int) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("getting home dir: %w", err)
+		fmt.Printf("Warning: could not clean known_hosts: %v\n", err)
+		return
 	}
 
 	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
-	if err = knownhosts.RemoveEntry(knownHostsPath, "localhost", opts.localPort); err != nil {
+
+	if err = knownhosts.RemoveEntry(knownHostsPath, "localhost", localPort); err != nil {
 		fmt.Printf("Warning: could not clean known_hosts: %v\n", err)
 	}
+}
 
-	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+func startPortForward(cmd *cobra.Command, opts *upOptions, podName string) error {
+	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	pfCmd := kubectlPortForward(ctx, opts.k8sConfig, opts.namespace, pod.Name, opts.localPort, 2222)
+	pfCmd := kubectlPortForward(ctx, opts.k8sConfig, opts.namespace, podName, opts.localPort, 2222)
 	pfCmd.Stdout = cmd.OutOrStdout()
 	pfCmd.Stderr = cmd.OutOrStderr()
 
-	if err = pfCmd.Start(); err != nil {
+	if err := pfCmd.Start(); err != nil {
 		return fmt.Errorf("starting port-forward: %w", err)
 	}
 
@@ -189,7 +237,7 @@ func runUp(cmd *cobra.Command, opts *upOptions) error {
 	fmt.Printf("SSH:   ssh -p %d nonroot@localhost\n", opts.localPort)
 	fmt.Print("Stop:  Ctrl+C\n\n")
 
-	if err = pfCmd.Wait(); err != nil {
+	if err := pfCmd.Wait(); err != nil {
 		if ctx.Err() != nil {
 			fmt.Println("\nStopping port-forward...")
 			return nil

@@ -37,22 +37,5 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("yaml.Unmarshal(%s): %w", path, err)
 	}
 
-	cfg.setDefaults()
-
 	return &cfg, nil
-}
-
-// ApplyDefaults fills zero-value fields with sensible defaults.
-func (c *Config) setDefaults() {
-	if c.Namespace == "" {
-		c.Namespace = "default"
-	}
-
-	if c.Kind == "" {
-		c.Kind = "daemonset"
-	}
-
-	if c.Image == "" {
-		c.Image = "ghcr.io/epicstep/hatch:v0.0.1"
-	}
 }

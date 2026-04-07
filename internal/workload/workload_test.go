@@ -170,7 +170,7 @@ func TestFindContainer_NotFound(t *testing.T) {
 
 	_, err = FindContainer(w, "missing")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "container \"missing\" not found")
+	assert.Contains(t, err.Error(), "container 'missing' not found")
 }
 
 func TestDeepCopy_IsIndependent(t *testing.T) {

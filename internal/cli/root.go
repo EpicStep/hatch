@@ -29,11 +29,25 @@ func (opts *generalOptions) validate() error {
 		return errors.New("workload name is required (set in .hatch.yaml or use --workload)")
 	}
 
-	if opts.workload == "" {
+	if opts.container == "" {
 		return errors.New("container name is required (set in .hatch.yaml or use --container)")
 	}
 
 	return nil
+}
+
+func (opts *generalOptions) setDefaults() {
+	if opts.kind == "" {
+		opts.kind = "daemonset"
+	}
+
+	if opts.image == "" {
+		opts.image = "ghcr.io/epicstep/hatch:v0.0.1"
+	}
+
+	if opts.user == "" {
+		opts.user = os.Getenv("USER")
+	}
 }
 
 func (opts *generalOptions) kubeClient() (kubernetes.Interface, error) {
@@ -57,14 +71,23 @@ func NewRootCmd(version string) *cobra.Command {
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			configFromFile, err := config.Load(opts.configPath)
 			if err != nil {
 				return fmt.Errorf("config.Load: %w", err)
 			}
 
-			if !cmd.Flags().Changed("namespace") {
+			if cmd.Flags().Changed("namespace") {
+				opts.namespace = *opts.k8sConfig.Namespace
+			} else if configFromFile.Namespace != "" {
 				opts.namespace = configFromFile.Namespace
+			} else {
+				ns, _, err := opts.k8sConfig.ToRawKubeConfigLoader().Namespace()
+				if err != nil {
+					return fmt.Errorf("resolving namespace from kubeconfig: %w", err)
+				}
+
+				opts.namespace = ns
 			}
 
 			if !cmd.Flags().Changed("kind") {
@@ -83,9 +106,7 @@ func NewRootCmd(version string) *cobra.Command {
 				opts.image = configFromFile.Image
 			}
 
-			if opts.user == "" {
-				opts.user = os.Getenv("USER")
-			}
+			opts.setDefaults()
 
 			if err = opts.validate(); err != nil {
 				return fmt.Errorf("validate: %w", err)

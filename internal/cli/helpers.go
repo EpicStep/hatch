@@ -35,9 +35,9 @@ func kubectlPortForward(ctx context.Context, flags *genericclioptions.ConfigFlag
 	return exec.CommandContext(ctx, "kubectl", args...)
 }
 
-func waitForPodReady(ctx context.Context, clientset kubernetes.Interface, namespace, podName string) error {
+func waitForPodReady(ctx context.Context, client kubernetes.Interface, namespace, podName string) error {
 	return wait.PollUntilContextTimeout(ctx, 2*time.Second, 120*time.Second, true, func(ctx context.Context) (bool, error) {
-		pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+		pod, err := client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 		if err != nil {
 			return false, nil
 		}
@@ -46,36 +46,55 @@ func waitForPodReady(ctx context.Context, clientset kubernetes.Interface, namesp
 	})
 }
 
-func selectPod(ctx context.Context, clientset kubernetes.Interface, namespace string, selector map[string]string, nodeHint, podHint, storedNode, storedPod string) (*corev1.Pod, error) {
-	podsClient := clientset.CoreV1().Pods(namespace)
-
+func selectPod(ctx context.Context, client kubernetes.Interface, namespace string, selector map[string]string, nodeHint, podHint string, hints reconnectHints) (*corev1.Pod, error) {
 	if podHint != "" {
-		pod, err := podsClient.Get(ctx, podHint, metav1.GetOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("pod %s not found: %w", podHint, err)
-		}
-		return pod, nil
+		return getPodByName(ctx, client, namespace, podHint)
 	}
 
 	if nodeHint != "" {
-		return findPodOnNode(ctx, clientset, namespace, selector, nodeHint)
+		return findPodOnNode(ctx, client, namespace, selector, nodeHint)
 	}
 
-	if storedPod != "" {
-		pod, err := podsClient.Get(ctx, storedPod, metav1.GetOptions{})
+	if pod := tryReconnectPod(ctx, client, namespace, selector, hints); pod != nil {
+		return pod, nil
+	}
+
+	return findAnyPod(ctx, client, namespace, selector)
+}
+
+func getPodByName(ctx context.Context, client kubernetes.Interface, namespace, name string) (*corev1.Pod, error) {
+	pod, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("pod %s not found: %w", name, err)
+	}
+
+	return pod, nil
+}
+
+func tryReconnectPod(ctx context.Context, client kubernetes.Interface, namespace string, selector map[string]string, hints reconnectHints) *corev1.Pod {
+	if !hints.active {
+		return nil
+	}
+
+	if hints.pod != "" {
+		pod, err := client.CoreV1().Pods(namespace).Get(ctx, hints.pod, metav1.GetOptions{})
 		if err == nil {
-			return pod, nil
+			return pod
 		}
 	}
 
-	if storedNode != "" {
-		pod, err := findPodOnNode(ctx, clientset, namespace, selector, storedNode)
+	if hints.node != "" {
+		pod, err := findPodOnNode(ctx, client, namespace, selector, hints.node)
 		if err == nil {
-			return pod, nil
+			return pod
 		}
 	}
 
-	list, err := podsClient.List(ctx, metav1.ListOptions{
+	return nil
+}
+
+func findAnyPod(ctx context.Context, client kubernetes.Interface, namespace string, selector map[string]string) (*corev1.Pod, error) {
+	list, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labels.Set(selector).String(),
 	})
 	if err != nil {
@@ -89,16 +108,20 @@ func selectPod(ctx context.Context, clientset kubernetes.Interface, namespace st
 	slices.SortFunc(list.Items, func(a, b corev1.Pod) int {
 		return b.CreationTimestamp.Compare(a.CreationTimestamp.Time)
 	})
-	for i := range list.Items {
-		if isPodReady(&list.Items[i]) {
-			return &list.Items[i], nil
+
+	for _, pod := range list.Items {
+		if !isPodReady(&pod) {
+			continue
 		}
+
+		return &pod, nil
 	}
+
 	return &list.Items[0], nil
 }
 
-func findPodOnNode(ctx context.Context, clientset kubernetes.Interface, namespace string, selector map[string]string, node string) (*corev1.Pod, error) {
-	list, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+func findPodOnNode(ctx context.Context, client kubernetes.Interface, namespace string, selector map[string]string, node string) (*corev1.Pod, error) {
+	list, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labels.Set(selector).String(),
 		FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node).String(),
 	})
