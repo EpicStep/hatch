@@ -25,7 +25,8 @@ Local machine                          K8s cluster
 
 ```bash
 # Via krew
-kubectl krew install hatch
+kubectl krew index add epicstep https://github.com/EpicStep/krew-index.git
+kubectl krew install epicstep/hatch
 
 # Via go install
 go install github.com/EpicStep/hatch/cmd/kubectl-hatch@latest
