@@ -22,13 +22,15 @@ builds:
 
 archives:
   - id: kubectl-hatch
-    builds:
+    ids:
       - kubectl-hatch
     name_template: "kubectl-hatch_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
-    format: tar.gz
+    formats:
+      - tar.gz
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
     files:
       - LICENSE
 
