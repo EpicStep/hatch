@@ -7,6 +7,7 @@ RUN apt-get update \
         openssh-server \
         procps \
         curl \
+        rsync \
         # Add service-specific runtime deps below:
         # libspdk-dev libnuma-dev ...
         ${EXTRA_PACKAGES} \
@@ -32,6 +33,7 @@ PubkeyAuthentication yes
 PermitUserEnvironment yes
 StrictModes no
 UsePAM no
+Subsystem sftp /usr/lib/openssh/sftp-server
 PidFile /home/nonroot/sshd.pid
 EOF
 
