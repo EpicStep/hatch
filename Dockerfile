@@ -8,10 +8,16 @@ RUN apt-get update \
         procps \
         curl \
         rsync \
+        libcap2-bin \
         # Add service-specific runtime deps below:
         # libspdk-dev libnuma-dev ...
         ${EXTRA_PACKAGES} \
     && rm -rf /var/lib/apt/lists/*
+
+# Lets the entrypoint pass CAP_SYS_PTRACE to SSH sessions for debuggers.
+# Permitted only, no effective bit: setpriv still runs when the pod lacks
+# SYS_PTRACE, it just gets nothing.
+RUN setcap cap_sys_ptrace+p /usr/bin/setpriv
 
 # nonroot user (uid 65532) — matches distroless nonroot for prod consistency
 RUN groupadd -g 65532 nonroot \

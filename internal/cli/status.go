@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"text/tabwriter"
 
@@ -59,8 +60,13 @@ func newStatusCmd(opts *generalOptions) *cobra.Command {
 					devInfo += fmt.Sprintf(" pod %s", p)
 				}
 
+				var original originalContainer
+				if err = json.Unmarshal([]byte(ann[annotationOriginal]), &original); err != nil {
+					original.Image = "unknown"
+				}
+
 				fmt.Printf("Dev Mode:   %s\n", devInfo)
-				fmt.Printf("Original:   %s\n", ann[annotationOriginalImage])
+				fmt.Printf("Original:   %s\n", original.Image)
 			} else {
 				fmt.Print("Dev Mode:   INACTIVE")
 			}

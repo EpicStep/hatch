@@ -42,9 +42,14 @@ func runDown(cmd *cobra.Command, opts *generalOptions) error {
 		return nil
 	}
 
-	originalImage := w.Annotations()[annotationOriginalImage]
-	if originalImage == "" {
-		return errors.New("annotation " + annotationOriginalImage + " is missing, cannot determine original image")
+	raw := w.Annotations()[annotationOriginal]
+	if raw == "" {
+		return errors.New("annotation " + annotationOriginal + " is missing, cannot restore the original container (dev mode started by hatch 0.0.8 or older must be stopped with that version)")
+	}
+
+	var original originalContainer
+	if err = json.Unmarshal([]byte(raw), &original); err != nil {
+		return fmt.Errorf("parsing annotation %s: %w", annotationOriginal, err)
 	}
 
 	activeUser := w.Annotations()[annotationUser]
@@ -57,44 +62,19 @@ func runDown(cmd *cobra.Command, opts *generalOptions) error {
 		return fmt.Errorf("in %s/%s: %w", opts.kind, opts.workload, err)
 	}
 
-	// Single atomic patch: restore image, command, args and
-	// readOnlyRootFilesystem, remove env, delete annotations.
 	before := w.DeepCopy()
 
-	container.Image = originalImage
-	container.Command = nil
-	container.Args = nil
-
-	if raw := w.Annotations()[annotationOriginalCommand]; raw != "" {
-		if err = json.Unmarshal([]byte(raw), &container.Command); err != nil {
-			return fmt.Errorf("restoring original command: %w", err)
-		}
-	}
-
-	if raw := w.Annotations()[annotationOriginalArgs]; raw != "" {
-		if err = json.Unmarshal([]byte(raw), &container.Args); err != nil {
-			return fmt.Errorf("restoring original args: %w", err)
-		}
-	}
-
-	if w.Annotations()[annotationOriginalReadOnlyRootFS] == "true" {
-		if container.SecurityContext == nil {
-			container.SecurityContext = &corev1.SecurityContext{}
-		}
-
-		container.SecurityContext.ReadOnlyRootFilesystem = new(true)
-	}
-
+	container.Image = original.Image
+	container.Command = original.Command
+	container.Args = original.Args
+	container.SecurityContext = original.SecurityContext
 	container.Env = slices.DeleteFunc(container.Env, func(e corev1.EnvVar) bool {
 		return e.Name == "AUTHORIZED_KEYS"
 	})
 
 	ann := w.Annotations()
 	delete(ann, annotationActive)
-	delete(ann, annotationOriginalImage)
-	delete(ann, annotationOriginalCommand)
-	delete(ann, annotationOriginalArgs)
-	delete(ann, annotationOriginalReadOnlyRootFS)
+	delete(ann, annotationOriginal)
 	delete(ann, annotationUser)
 	delete(ann, annotationNode)
 	delete(ann, annotationPod)
@@ -104,12 +84,13 @@ func runDown(cmd *cobra.Command, opts *generalOptions) error {
 		return fmt.Errorf("building patch: %w", err)
 	}
 
-	fmt.Printf("Restoring %s/%s: image=%s\n", opts.kind, opts.workload, originalImage)
+	fmt.Printf("Restoring %s/%s: image=%s\n", opts.kind, opts.workload, original.Image)
 
 	if err = w.Patch(ctx, patchBytes, types.StrategicMergePatchType); err != nil {
 		return fmt.Errorf("restoring workload: %w", err)
 	}
 
-	fmt.Printf("Restored %s/%s to %s\n", opts.kind, opts.workload, originalImage)
+	fmt.Printf("Restored %s/%s to %s\n", opts.kind, opts.workload, original.Image)
+
 	return nil
 }

@@ -17,15 +17,21 @@ import (
 )
 
 const (
-	annotationActive                 = "hatch.dev/active"
-	annotationOriginalImage          = "hatch.dev/original-image"
-	annotationOriginalCommand        = "hatch.dev/original-command"
-	annotationOriginalArgs           = "hatch.dev/original-args"
-	annotationOriginalReadOnlyRootFS = "hatch.dev/original-readonly-rootfs"
-	annotationUser                   = "hatch.dev/user"
-	annotationNode                   = "hatch.dev/node"
-	annotationPod                    = "hatch.dev/pod"
+	annotationActive   = "hatch.dev/active"
+	annotationOriginal = "hatch.dev/original"
+	annotationUser     = "hatch.dev/user"
+	annotationNode     = "hatch.dev/node"
+	annotationPod      = "hatch.dev/pod"
 )
+
+// originalContainer holds the container fields that dev mode replaces.
+// It is stored as JSON in the hatch.dev/original annotation for down.
+type originalContainer struct {
+	Image           string                  `json:"image"`
+	Command         []string                `json:"command,omitempty"`
+	Args            []string                `json:"args,omitempty"`
+	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
+}
 
 func kubectlRolloutStatus(ctx context.Context, flags *genericclioptions.ConfigFlags, namespace, kind, name string) error {
 	args := append(kubectlGlobalArgs(flags), "rollout", "status", kind+"/"+name, "-n", namespace, "--timeout=120s")

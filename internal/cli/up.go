@@ -8,13 +8,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 
 	"github.com/EpicStep/hatch/internal/knownhosts"
 	"github.com/EpicStep/hatch/internal/workload"
@@ -155,37 +155,24 @@ func checkReconnect(w workload.Workload, user string) (reconnectHints, error) {
 func activateDevMode(ctx context.Context, opts *upOptions, w workload.Workload, container *corev1.Container, sshPubKey string) error {
 	before := w.DeepCopy()
 
+	originalJSON, err := json.Marshal(originalContainer{
+		Image:           container.Image,
+		Command:         container.Command,
+		Args:            container.Args,
+		SecurityContext: container.SecurityContext,
+	})
+	if err != nil {
+		return fmt.Errorf("marshaling original container: %w", err)
+	}
+
 	ann := w.Annotations()
 	if ann == nil {
 		ann = make(map[string]string)
 	}
 
 	ann[annotationActive] = "true"
-	ann[annotationOriginalImage] = container.Image
+	ann[annotationOriginal] = string(originalJSON)
 	ann[annotationUser] = opts.user
-
-	if len(container.Command) > 0 {
-		commandJSON, err := json.Marshal(container.Command)
-		if err != nil {
-			return fmt.Errorf("marshaling original command: %w", err)
-		}
-
-		ann[annotationOriginalCommand] = string(commandJSON)
-	}
-
-	if len(container.Args) > 0 {
-		argsJSON, err := json.Marshal(container.Args)
-		if err != nil {
-			return fmt.Errorf("marshaling original args: %w", err)
-		}
-
-		ann[annotationOriginalArgs] = string(argsJSON)
-	}
-
-	if sc := container.SecurityContext; sc != nil && ptr.Deref(sc.ReadOnlyRootFilesystem, false) {
-		ann[annotationOriginalReadOnlyRootFS] = "true"
-		sc.ReadOnlyRootFilesystem = new(false)
-	}
 
 	w.SetAnnotations(ann)
 
@@ -196,6 +183,22 @@ func activateDevMode(ctx context.Context, opts *upOptions, w workload.Workload, 
 		Name:  "AUTHORIZED_KEYS",
 		Value: sshPubKey,
 	})
+
+	if container.SecurityContext == nil {
+		container.SecurityContext = &corev1.SecurityContext{}
+	}
+
+	sc := container.SecurityContext
+	sc.ReadOnlyRootFilesystem = new(false)
+	sc.AllowPrivilegeEscalation = new(true)
+
+	if sc.Capabilities == nil {
+		sc.Capabilities = &corev1.Capabilities{}
+	}
+
+	if !slices.Contains(sc.Capabilities.Add, "SYS_PTRACE") {
+		sc.Capabilities.Add = append(sc.Capabilities.Add, "SYS_PTRACE")
+	}
 
 	patchBytes, err := workload.MergeFrom(before, w.Object())
 	if err != nil {

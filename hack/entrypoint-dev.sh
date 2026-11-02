@@ -18,4 +18,14 @@ if [ -n "${AUTHORIZED_KEYS}" ]; then
     chmod 644 /home/nonroot/.ssh/authorized_keys
 fi
 
-exec /usr/sbin/sshd -D -e -f /home/nonroot/sshd_config
+SSHD=(/usr/sbin/sshd -D -e -f /home/nonroot/sshd_config)
+
+# Pass CAP_SYS_PTRACE to sshd and every SSH session as an ambient capability,
+# so debuggers such as delve work. setpriv gets it from its file capability,
+# which only applies when the pod adds SYS_PTRACE and allows privilege
+# escalation (hatch up does both). Otherwise start sshd without it.
+if setpriv --inh-caps=+sys_ptrace --ambient-caps=+sys_ptrace true 2>/dev/null; then
+    exec setpriv --inh-caps=+sys_ptrace --ambient-caps=+sys_ptrace -- "${SSHD[@]}"
+fi
+
+exec "${SSHD[@]}"

@@ -36,8 +36,7 @@ common Annotations/Selector/PodSpec/Patch methods. Factory: `workload.New(ctx, c
 All state tracked via workload annotations:
 
 - `hatch.dev/active` — "true" when dev mode is on
-- `hatch.dev/original-image` — image before swap
-- `hatch.dev/original-readonly-rootfs` — "true" if hatch turned off the container's `readOnlyRootFilesystem`
+- `hatch.dev/original` — JSON of the container fields dev mode replaces: `image`, `command`, `args`, `securityContext` (`up` adds `SYS_PTRACE`, allows privilege escalation, turns off `readOnlyRootFilesystem`)
 - `hatch.dev/user` — who activated dev mode
 - `hatch.dev/node`, `hatch.dev/pod` — reconnect hints
 
