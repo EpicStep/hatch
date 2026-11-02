@@ -68,6 +68,7 @@ Update `image` in `.hatch.yaml` accordingly.
 ## Features
 
 - **Non-root** — runs as uid 65532 (`nonroot`), compatible with `runAsNonRoot` pod security policies
+- **Writable root filesystem** — if the container sets `readOnlyRootFilesystem: true`, `up` turns it off for the dev container and `down` turns it back on
 - **Secrets passthrough** — K8s-injected env vars are exported to SSH sessions via `PermitUserEnvironment`
 - **SSH key injection** — public key passed through env var at deploy time, no baking keys into the image
 - **known_hosts cleanup** — automatically removes stale host key entries on `up`, no MITM warnings

@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 
 	"github.com/EpicStep/hatch/internal/knownhosts"
 	"github.com/EpicStep/hatch/internal/workload"
@@ -179,6 +180,11 @@ func activateDevMode(ctx context.Context, opts *upOptions, w workload.Workload, 
 		}
 
 		ann[annotationOriginalArgs] = string(argsJSON)
+	}
+
+	if sc := container.SecurityContext; sc != nil && ptr.Deref(sc.ReadOnlyRootFilesystem, false) {
+		ann[annotationOriginalReadOnlyRootFS] = "true"
+		sc.ReadOnlyRootFilesystem = new(false)
 	}
 
 	w.SetAnnotations(ann)

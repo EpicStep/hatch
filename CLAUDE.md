@@ -37,6 +37,7 @@ All state tracked via workload annotations:
 
 - `hatch.dev/active` — "true" when dev mode is on
 - `hatch.dev/original-image` — image before swap
+- `hatch.dev/original-readonly-rootfs` — "true" if hatch turned off the container's `readOnlyRootFilesystem`
 - `hatch.dev/user` — who activated dev mode
 - `hatch.dev/node`, `hatch.dev/pod` — reconnect hints
 
