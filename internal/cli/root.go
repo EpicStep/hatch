@@ -42,7 +42,7 @@ func (opts *generalOptions) setDefaults() {
 	}
 
 	if opts.image == "" {
-		opts.image = "ghcr.io/epicstep/hatch:0.0.9"
+		opts.image = "ghcr.io/epicstep/hatch:0.1.0"
 	}
 
 	if opts.user == "" {
