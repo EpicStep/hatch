@@ -7,7 +7,7 @@ Temporarily replaces a workload's container image with an SSH-enabled dev contai
 inheriting all pod configuration (mounts, secrets, network topology).
 
 Module: `github.com/EpicStep/hatch`
-Go: 1.26
+Go: 1.27
 License: MIT
 
 ## Architecture

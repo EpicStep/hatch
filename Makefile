@@ -1,4 +1,4 @@
-GOLANGCI_LINT_VERSION = 2.11.4
+GOLANGCI_LINT_VERSION = 2.15.0
 
 .PHONY: test lint lint-fix fmt
 
